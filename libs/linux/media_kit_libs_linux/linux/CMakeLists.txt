@@ -96,8 +96,6 @@ if(MIMALLOC_USE_STATIC_LIBS)
     add_custom_command(
       OUTPUT ${MIMALLOC_LIB}
       COMMAND "${CMAKE_COMMAND}" -E tar xzf "${MIMALLOC_ARCHIVE}"
-
-      # add_subdirectory() is too much work. Alternatively building it through command line.
       COMMAND "mkdir" "-p" "out/release"
       COMMAND "cd" "out/release"
       COMMAND "${CMAKE_COMMAND}" "../../mimalloc-2.1.2"
