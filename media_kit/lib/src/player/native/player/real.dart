@@ -1670,9 +1670,9 @@ class NativePlayer extends PlatformPlayer {
           prop.ref.format == generated.mpv_format.MPV_FORMAT_NODE) {
         final value = prop.ref.data.cast<generated.mpv_node>();
         if (value.ref.format == generated.mpv_format.MPV_FORMAT_NODE_ARRAY) {
-          final video = [VideoTrack.auto(), VideoTrack.no()];
-          final audio = [AudioTrack.auto(), AudioTrack.no()];
-          final subtitle = [SubtitleTrack.auto(), SubtitleTrack.no()];
+          final video = [VideoTrack.no()];
+          final audio = [AudioTrack.no()];
+          final subtitle = [SubtitleTrack.no()];
 
           final tracks = value.ref.u.list.ref;
 
@@ -1698,6 +1698,7 @@ class NativePlayer extends PlatformPlayer {
               int? rotate;
               double? par;
               int? audiochannels;
+              bool selected = false;
               for (int j = 0; j < map.num; j++) {
                 final property = map.keys[j].cast<Utf8>().toDartString();
                 if (map.values[j].format ==
@@ -1737,6 +1738,9 @@ class NativePlayer extends PlatformPlayer {
                       break;
                     case 'albumart':
                       albumart = map.values[j].u.flag > 0;
+                      break;
+                    case 'selected':
+                      selected = map.values[j].u.flag > 0;
                       break;
                   }
                 }
@@ -1821,6 +1825,7 @@ class NativePlayer extends PlatformPlayer {
                       rotate: rotate,
                       par: par,
                       audiochannels: audiochannels,
+                      selected: selected,
                     ),
                   );
                   break;

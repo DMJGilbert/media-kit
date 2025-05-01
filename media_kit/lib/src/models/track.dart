@@ -143,6 +143,7 @@ class VideoTrack extends _Track {
 class AudioTrack extends _Track {
   /// Whether the audio track is loaded from URI.
   final bool uri;
+  final bool selected;
 
   /// {@macro audio_track}
   const AudioTrack(
@@ -164,6 +165,7 @@ class AudioTrack extends _Track {
     super.par,
     super.audiochannels,
     this.uri = false,
+    this.selected = false,
   });
 
   /// No audio track. Disables audio output.
@@ -195,7 +197,7 @@ class AudioTrack extends _Track {
       return true;
     }
     if (other is AudioTrack) {
-      return id == other.id && uri == other.uri;
+      return id == other.id && uri == other.uri && selected == other.selected;
     }
     return false;
   }
