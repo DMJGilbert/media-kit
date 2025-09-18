@@ -113,6 +113,8 @@ class Video extends StatefulWidget {
   /// The callback invoked when the [Video] exits fullscreen.
   final Future<void> Function() onExitFullscreen;
 
+  final Widget? overlay;
+
   /// {@macro video}
   const Video({
     Key? key,
@@ -131,6 +133,7 @@ class Video extends StatefulWidget {
     this.subtitleViewConfiguration = const SubtitleViewConfiguration(),
     this.onEnterFullscreen = defaultEnterNativeFullscreen,
     this.onExitFullscreen = defaultExitNativeFullscreen,
+    this.overlay,
   }) : super(key: key);
 
   @override
@@ -425,6 +428,8 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                                       videoViewParameters.fill,
                                                 ),
                                               ),
+                                            if (widget.overlay != null)
+                                              widget.overlay!,
                                           ],
                                         ),
                                       );
