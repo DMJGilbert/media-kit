@@ -113,6 +113,8 @@ class Video extends StatefulWidget {
   /// The callback invoked when the [Video] exits fullscreen.
   final Future<void> Function() onExitFullscreen;
 
+  final Widget? overlay;
+
   /// FocusNode for keyboard input.
   final FocusNode? focusNode;
 
@@ -134,6 +136,7 @@ class Video extends StatefulWidget {
     this.subtitleViewConfiguration = const SubtitleViewConfiguration(),
     this.onEnterFullscreen = defaultEnterNativeFullscreen,
     this.onExitFullscreen = defaultExitNativeFullscreen,
+    this.overlay,
     this.focusNode,
   });
 
@@ -435,6 +438,8 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                                       videoViewParameters.fill,
                                                 ),
                                               ),
+                                            if (widget.overlay != null)
+                                              widget.overlay!,
                                           ],
                                         ),
                                       );
