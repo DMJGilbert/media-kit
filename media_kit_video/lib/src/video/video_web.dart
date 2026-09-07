@@ -426,10 +426,19 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                           children: [
                                             const SizedBox(),
                                             Positioned.fill(
+                                              // Taps must reach the widgets
+                                              // around the video, so the
+                                              // platform view stays out of
+                                              // Flutter's hit test and the
+                                              // Container behind it takes
+                                              // the hit instead.
                                               child: HtmlElementView(
                                                 key: _key,
                                                 viewType:
                                                     'com.alexmercerind.media_kit_video.$id',
+                                                hitTestBehavior:
+                                                    PlatformViewHitTestBehavior
+                                                        .transparent,
                                               ),
                                             ),
                                             if (widget.overlay != null)
