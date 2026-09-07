@@ -60,6 +60,9 @@ class WebPlayer extends PlatformPlayer {
         ..style.width = '100%'
         ..style.height = '100%'
         ..style.border = 'none'
+        // Flutter owns all pointer handling; a platform view that swallows
+        // clicks and hovers would hide them from the widgets around it.
+        ..style.pointerEvents = 'none'
         /* ..setAttribute('autoplay', 'false') */
         ..setAttribute('playsinline', 'true')
         ..pause();
@@ -412,10 +415,7 @@ class WebPlayer extends PlatformPlayer {
 
       if (play) {
         element.play().toDart.catchError((error) {
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         });
       } else {
@@ -565,11 +565,7 @@ class WebPlayer extends PlatformPlayer {
       await waitForVideoControllerInitializationIfAttached;
       element.play().toDart.catchError(
         (error) {
-          // PlayerStream.error
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         },
       );
@@ -1476,6 +1472,36 @@ class WebPlayer extends PlatformPlayer {
       return function();
     }
   }
+
+  /// Browsers refuse audible playback that no user gesture preceded, e.g. on a
+  /// page reload. Muted playback is always allowed, so start muted and restore
+  /// the sound at the first pointer or key event.
+  void _handlePlayError(web.DOMException e) {
+    if (e.name == 'NotAllowedError' && !element.muted && !_mutedForAutoplay) {
+      _mutedForAutoplay = true;
+      element.muted = true;
+      element.play().toDart.catchError((_) => null);
+      void restore(web.Event _) {
+        web.document.removeEventListener('pointerdown', _restoreSound);
+        web.document.removeEventListener('keydown', _restoreSound);
+        if (_mutedForAutoplay) {
+          _mutedForAutoplay = false;
+          element.muted = false;
+        }
+      }
+      _restoreSound = restore.toJS;
+      web.document.addEventListener('pointerdown', _restoreSound);
+      web.document.addEventListener('keydown', _restoreSound);
+      return;
+    }
+    // PlayerStream.error
+    if (!errorController.isClosed) {
+      errorController.add(e.message);
+    }
+  }
+
+  bool _mutedForAutoplay = false;
+  web.EventListener? _restoreSound;
 
   void _loadSource(Media media) {
     try {
