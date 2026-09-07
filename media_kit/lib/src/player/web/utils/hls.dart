@@ -106,6 +106,7 @@ class Hls {
 extension ExtensionHls on Hls {
   external void loadSource(String src);
   external void attachMedia(web.HTMLVideoElement video);
+  external void destroy();
 }
 
 // --------------------------------------------------
