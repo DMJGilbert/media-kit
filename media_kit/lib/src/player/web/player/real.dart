@@ -329,6 +329,8 @@ class WebPlayer extends PlatformPlayer {
 
       disposed = true;
 
+      _hls?.destroy();
+      _hls = null;
       element
         ..src = ''
         ..load()
@@ -455,6 +457,8 @@ class WebPlayer extends PlatformPlayer {
         trackController.add(Track());
       }
 
+      _hls?.destroy();
+      _hls = null;
       element
         ..src = ''
         ..load();
@@ -1475,6 +1479,8 @@ class WebPlayer extends PlatformPlayer {
 
   void _loadSource(Media media) {
     try {
+      _hls?.destroy();
+      _hls = null;
       if (_isHLS(media)) {
         void setHlsHTTPHeaders(web.XMLHttpRequest xhr, String url) {
           for (final header in media.httpHeaders!.entries) {
@@ -1492,6 +1498,7 @@ class WebPlayer extends PlatformPlayer {
 
         hls.loadSource(media.uri);
         hls.attachMedia(element);
+        _hls = hls;
       } else {
         // Default
         String src = media.uri;
@@ -1637,6 +1644,11 @@ class WebPlayer extends PlatformPlayer {
 
   /// [html.VideoElement] instance reference.
   late web.HTMLVideoElement element;
+
+  /// hls.js instance attached to [element] while an HLS source is loaded.
+  /// hls.js keeps listening to the element until destroyed, so only one
+  /// instance may ever be attached at a time.
+  Hls? _hls;
 
   /// Whether the [Player] has been disposed.
   bool disposed = false;
