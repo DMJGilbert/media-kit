@@ -8,6 +8,7 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart';
 import 'dart:async';
+import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
