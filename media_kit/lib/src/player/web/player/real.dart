@@ -1475,7 +1475,7 @@ class WebPlayer extends PlatformPlayer {
 
   void _loadSource(Media media) {
     try {
-      if (_isHLS(media.uri)) {
+      if (_isHLS(media)) {
         void setHlsHTTPHeaders(web.XMLHttpRequest xhr, String url) {
           for (final header in media.httpHeaders!.entries) {
             xhr.setRequestHeader(header.key, header.value);
@@ -1515,7 +1515,7 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
-  bool _isHLS(String src) {
+  bool _isHLS(Media media) {
     final userAgent = web.window.navigator.userAgent;
     final isAndroidChrome =
         userAgent.contains("Android") && userAgent.contains("Chrome");
@@ -1524,7 +1524,11 @@ class WebPlayer extends PlatformPlayer {
         element.canPlayType('application/vnd.apple.mpegurl') != '') {
       return false;
     }
-    if (isHLSSupported() && src.toLowerCase().contains('m3u8')) {
+    // A caller that knows the stream is HLS can pass `extras: {'hls': true}`
+    // for playlist URLs that carry no .m3u8 extension.
+    final hinted = media.extras?['hls'] == true;
+    if (isHLSSupported() &&
+        (hinted || media.uri.toLowerCase().contains('m3u8'))) {
       return true;
     }
     return false;

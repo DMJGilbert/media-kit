@@ -111,6 +111,8 @@ class Video extends StatefulWidget {
   /// The callback invoked when the [Video] exits fullscreen.
   final Future<void> Function() onExitFullscreen;
 
+  final Widget? overlay;
+
   /// FocusNode for keyboard input.
   final FocusNode? focusNode;
 
@@ -132,6 +134,7 @@ class Video extends StatefulWidget {
     this.subtitleViewConfiguration = const SubtitleViewConfiguration(),
     this.onEnterFullscreen = defaultEnterNativeFullscreen,
     this.onExitFullscreen = defaultExitNativeFullscreen,
+    this.overlay,
     this.focusNode,
   });
 
@@ -419,10 +422,19 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                                     videoViewParameters
                                                         .aspectRatio!,
                                         height: rect.height,
-                                        child: HtmlElementView(
-                                          key: _key,
-                                          viewType:
-                                              'com.alexmercerind.media_kit_video.$id',
+                                        child: Stack(
+                                          children: [
+                                            const SizedBox(),
+                                            Positioned.fill(
+                                              child: HtmlElementView(
+                                                key: _key,
+                                                viewType:
+                                                    'com.alexmercerind.media_kit_video.$id',
+                                              ),
+                                            ),
+                                            if (widget.overlay != null)
+                                              widget.overlay!,
+                                          ],
                                         ),
                                       );
                                     }
