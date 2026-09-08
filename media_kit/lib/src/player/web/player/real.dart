@@ -1549,22 +1549,19 @@ class WebPlayer extends PlatformPlayer {
   }
 
   bool _isHLS(Media media) {
-    final userAgent = web.window.navigator.userAgent;
-    final isAndroidChrome =
-        userAgent.contains("Android") && userAgent.contains("Chrome");
-
-    if (!isAndroidChrome &&
-        element.canPlayType('application/vnd.apple.mpegurl') != '') {
-      return false;
-    }
     // A caller that knows the stream is HLS can pass `extras: {'hls': true}`
     // for playlist URLs that carry no .m3u8 extension.
     final hinted = media.extras?['hls'] == true;
-    if (isHLSSupported() &&
-        (hinted || media.uri.toLowerCase().contains('m3u8'))) {
-      return true;
+    if (!hinted && !media.uri.toLowerCase().contains('m3u8')) {
+      return false;
     }
-    return false;
+    // hls.js is preferred wherever Media Source Extensions exist, as its own
+    // README recommends: it behaves the same in every browser and exposes
+    // renditions and subtitle tracks, whereas the built-in players differ
+    // (Chromium reports HLS support through canPlayType but its player does
+    // not handle every stream and exposes no tracks). Browsers without MSE,
+    // such as Safari on iPhone, fall through to native playback via `src`.
+    return isHLSSupported();
   }
 
   Future<void> _transition() async {
