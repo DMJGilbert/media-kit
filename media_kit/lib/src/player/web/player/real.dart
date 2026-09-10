@@ -248,6 +248,12 @@ class WebPlayer extends PlatformPlayer {
             bufferingController.add(false);
           }
           // PlayerStream.error
+          // While hls.js is attached it owns the element and reports its own
+          // errors (recovering from some); an error after the source has been
+          // removed belongs to a load that was stopped on purpose.
+          if (_hls != null || element.getAttribute('src') == null) {
+            return;
+          }
           final error = element.error!;
           if (!errorController.isClosed) {
             errorController.add(error.message);
@@ -459,8 +465,10 @@ class WebPlayer extends PlatformPlayer {
 
       _hls?.destroy();
       _hls = null;
+      // Removing the attribute resets the element quietly; an empty src
+      // would raise an error event for a source that no longer exists.
       element
-        ..src = ''
+        ..removeAttribute('src')
         ..load();
 
       _shuffle.clear();
@@ -1492,6 +1500,12 @@ class WebPlayer extends PlatformPlayer {
       _restoreSound = restore.toJS;
       web.document.addEventListener('pointerdown', _restoreSound);
       web.document.addEventListener('keydown', _restoreSound);
+      return;
+    }
+    // A play() request that a later load or pause superseded is the player's
+    // own doing, not a failure of the media; a source that cannot play raises
+    // an error event on the element as well.
+    if (e.name == 'AbortError') {
       return;
     }
     // PlayerStream.error
