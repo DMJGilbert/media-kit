@@ -1522,6 +1522,25 @@ class WebPlayer extends PlatformPlayer {
           ),
         );
 
+        // hls.js failures never reach the video element, so report the fatal
+        // ones (hls.js gives up after those) on PlayerStream.error as
+        // "hls.js <details> (HTTP <status>): <url>". A status of 0 means the
+        // browser refused the request itself: an untrusted certificate, a
+        // missing CORS header, mixed content or an unreachable host.
+        void onHlsError(JSString _, HlsErrorData data) {
+          if (!data.fatal) {
+            return;
+          }
+          final code = data.response?.code;
+          final status = code == null ? '' : ' (HTTP $code)';
+          if (!errorController.isClosed) {
+            errorController.add(
+              'hls.js ${data.details}$status: ${data.url ?? data.frag?.url ?? media.uri}',
+            );
+          }
+        }
+
+        hls.on(hlsErrorEvent, onHlsError.toJS);
         hls.loadSource(media.uri);
         hls.attachMedia(element);
         _hls = hls;
