@@ -65,9 +65,9 @@ abstract class HLS {
   }
 
   static const String kHLSAsset =
-      'assets/packages/media_kit/assets/web/hls1.4.10.js';
+      'assets/packages/media_kit/assets/web/hls1.7.2.js';
   static const String kHLSCDN =
-      'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.4.10/hls.js';
+      'https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.7.2/hls.js';
 
   static final Lock _lock = Lock();
   static bool _initialized = false;
@@ -106,6 +106,53 @@ class Hls {
 extension ExtensionHls on Hls {
   external void loadSource(String src);
   external void attachMedia(web.HTMLVideoElement video);
+  external void destroy();
+  external void on(String event, JSFunction listener);
+}
+
+/// Name of the hls.js error event, for [ExtensionHls.on].
+@JS('Hls.Events.ERROR')
+external String get hlsErrorEvent;
+
+/// The data hls.js passes to an error listener.
+@JS()
+@staticInterop
+class HlsErrorData {}
+
+extension ExtensionHlsErrorData on HlsErrorData {
+  /// Broad category, e.g. networkError or mediaError.
+  external String get type;
+
+  /// Specific cause, e.g. manifestLoadError or fragLoadError.
+  external String get details;
+
+  /// hls.js stops after a fatal error; the rest it retries by itself.
+  external bool get fatal;
+
+  /// The URL that failed, for playlist and key requests.
+  external String? get url;
+
+  /// The fragment that failed, for segment requests.
+  external HlsFragment? get frag;
+
+  external HlsErrorResponse? get response;
+}
+
+@JS()
+@staticInterop
+class HlsFragment {}
+
+extension ExtensionHlsFragment on HlsFragment {
+  external String get url;
+}
+
+@JS()
+@staticInterop
+class HlsErrorResponse {}
+
+extension ExtensionHlsErrorResponse on HlsErrorResponse {
+  /// HTTP status; 0 when the browser refused or could not make the request.
+  external int? get code;
 }
 
 // --------------------------------------------------

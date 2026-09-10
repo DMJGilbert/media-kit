@@ -60,6 +60,9 @@ class WebPlayer extends PlatformPlayer {
         ..style.width = '100%'
         ..style.height = '100%'
         ..style.border = 'none'
+        // Flutter owns all pointer handling; a platform view that swallows
+        // clicks and hovers would hide them from the widgets around it.
+        ..style.pointerEvents = 'none'
         /* ..setAttribute('autoplay', 'false') */
         ..setAttribute('playsinline', 'true')
         ..pause();
@@ -245,6 +248,12 @@ class WebPlayer extends PlatformPlayer {
             bufferingController.add(false);
           }
           // PlayerStream.error
+          // While hls.js is attached it owns the element and reports its own
+          // errors (recovering from some); an error after the source has been
+          // removed belongs to a load that was stopped on purpose.
+          if (_hls != null || element.getAttribute('src') == null) {
+            return;
+          }
           final error = element.error!;
           if (!errorController.isClosed) {
             errorController.add(error.message);
@@ -329,6 +338,8 @@ class WebPlayer extends PlatformPlayer {
 
       disposed = true;
 
+      _hls?.destroy();
+      _hls = null;
       element
         ..src = ''
         ..load()
@@ -410,10 +421,7 @@ class WebPlayer extends PlatformPlayer {
 
       if (play) {
         element.play().toDart.catchError((error) {
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         });
       } else {
@@ -455,8 +463,12 @@ class WebPlayer extends PlatformPlayer {
         trackController.add(Track());
       }
 
+      _hls?.destroy();
+      _hls = null;
+      // Removing the attribute resets the element quietly; an empty src
+      // would raise an error event for a source that no longer exists.
       element
-        ..src = ''
+        ..removeAttribute('src')
         ..load();
 
       _shuffle.clear();
@@ -561,11 +573,7 @@ class WebPlayer extends PlatformPlayer {
       await waitForVideoControllerInitializationIfAttached;
       element.play().toDart.catchError(
         (error) {
-          // PlayerStream.error
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         },
       );
@@ -1473,9 +1481,47 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
+  /// Browsers refuse audible playback that no user gesture preceded, e.g. on a
+  /// page reload. Muted playback is always allowed, so start muted and restore
+  /// the sound at the first pointer or key event.
+  void _handlePlayError(web.DOMException e) {
+    if (e.name == 'NotAllowedError' && !element.muted && !_mutedForAutoplay) {
+      _mutedForAutoplay = true;
+      element.muted = true;
+      element.play().toDart.catchError((_) => null);
+      void restore(web.Event _) {
+        web.document.removeEventListener('pointerdown', _restoreSound);
+        web.document.removeEventListener('keydown', _restoreSound);
+        if (_mutedForAutoplay) {
+          _mutedForAutoplay = false;
+          element.muted = false;
+        }
+      }
+      _restoreSound = restore.toJS;
+      web.document.addEventListener('pointerdown', _restoreSound);
+      web.document.addEventListener('keydown', _restoreSound);
+      return;
+    }
+    // A play() request that a later load or pause superseded is the player's
+    // own doing, not a failure of the media; a source that cannot play raises
+    // an error event on the element as well.
+    if (e.name == 'AbortError') {
+      return;
+    }
+    // PlayerStream.error
+    if (!errorController.isClosed) {
+      errorController.add(e.message);
+    }
+  }
+
+  bool _mutedForAutoplay = false;
+  web.EventListener? _restoreSound;
+
   void _loadSource(Media media) {
     try {
-      if (_isHLS(media.uri)) {
+      _hls?.destroy();
+      _hls = null;
+      if (_isHLS(media)) {
         void setHlsHTTPHeaders(web.XMLHttpRequest xhr, String url) {
           for (final header in media.httpHeaders!.entries) {
             xhr.setRequestHeader(header.key, header.value);
@@ -1490,8 +1536,28 @@ class WebPlayer extends PlatformPlayer {
           ),
         );
 
+        // hls.js failures never reach the video element, so report the fatal
+        // ones (hls.js gives up after those) on PlayerStream.error as
+        // "hls.js <details> (HTTP <status>): <url>". A status of 0 means the
+        // browser refused the request itself: an untrusted certificate, a
+        // missing CORS header, mixed content or an unreachable host.
+        void onHlsError(JSString _, HlsErrorData data) {
+          if (!data.fatal) {
+            return;
+          }
+          final code = data.response?.code;
+          final status = code == null ? '' : ' (HTTP $code)';
+          if (!errorController.isClosed) {
+            errorController.add(
+              'hls.js ${data.details}$status: ${data.url ?? data.frag?.url ?? media.uri}',
+            );
+          }
+        }
+
+        hls.on(hlsErrorEvent, onHlsError.toJS);
         hls.loadSource(media.uri);
         hls.attachMedia(element);
+        _hls = hls;
       } else {
         // Default
         String src = media.uri;
@@ -1515,19 +1581,20 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
-  bool _isHLS(String src) {
-    final userAgent = web.window.navigator.userAgent;
-    final isAndroidChrome =
-        userAgent.contains("Android") && userAgent.contains("Chrome");
-
-    if (!isAndroidChrome &&
-        element.canPlayType('application/vnd.apple.mpegurl') != '') {
+  bool _isHLS(Media media) {
+    // A caller that knows the stream is HLS can pass `extras: {'hls': true}`
+    // for playlist URLs that carry no .m3u8 extension.
+    final hinted = media.extras?['hls'] == true;
+    if (!hinted && !media.uri.toLowerCase().contains('m3u8')) {
       return false;
     }
-    if (isHLSSupported() && src.toLowerCase().contains('m3u8')) {
-      return true;
-    }
-    return false;
+    // hls.js is preferred wherever Media Source Extensions exist, as its own
+    // README recommends: it behaves the same in every browser and exposes
+    // renditions and subtitle tracks, whereas the built-in players differ
+    // (Chromium reports HLS support through canPlayType but its player does
+    // not handle every stream and exposes no tracks). Browsers without MSE,
+    // such as Safari on iPhone, fall through to native playback via `src`.
+    return isHLSSupported();
   }
 
   Future<void> _transition() async {
@@ -1633,6 +1700,11 @@ class WebPlayer extends PlatformPlayer {
 
   /// [html.VideoElement] instance reference.
   late web.HTMLVideoElement element;
+
+  /// hls.js instance attached to [element] while an HLS source is loaded.
+  /// hls.js keeps listening to the element until destroyed, so only one
+  /// instance may ever be attached at a time.
+  Hls? _hls;
 
   /// Whether the [Player] has been disposed.
   bool disposed = false;
