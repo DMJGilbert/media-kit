@@ -340,6 +340,7 @@ class WebPlayer extends PlatformPlayer {
 
       _hls?.destroy();
       _hls = null;
+      await autoplayMutedController.close();
       element
         ..src = ''
         ..load()
@@ -1063,11 +1064,10 @@ class WebPlayer extends PlatformPlayer {
       await waitForPlayerInitialization;
       await waitForVideoControllerInitializationIfAttached;
 
-      // Unmute the player before setting the volume.
-      if (element.muted) {
-        element.muted = false;
-      }
-
+      // Volume 0 is mute. Keeping the element muted rather than merely at
+      // volume 0 lets it autoplay where audible playback is refused, and a
+      // browser pauses a video that script unmutes before any user gesture.
+      element.muted = volume <= 0;
       element.volume = volume / 100.0;
     }
 
@@ -1482,24 +1482,17 @@ class WebPlayer extends PlatformPlayer {
   }
 
   /// Browsers refuse audible playback that no user gesture preceded, e.g. on a
-  /// page reload. Muted playback is always allowed, so start muted and restore
-  /// the sound at the first pointer or key event.
+  /// page reload. Muted playback is always allowed, so fall back to it and tell
+  /// the application through [autoplayMuted]; the sound comes back when the
+  /// application next sets a non-zero volume, which it does from a user
+  /// gesture such as pressing its own unmute control.
   void _handlePlayError(web.DOMException e) {
-    if (e.name == 'NotAllowedError' && !element.muted && !_mutedForAutoplay) {
-      _mutedForAutoplay = true;
+    if (e.name == 'NotAllowedError' && !element.muted) {
       element.muted = true;
       element.play().toDart.catchError((_) => null);
-      void restore(web.Event _) {
-        web.document.removeEventListener('pointerdown', _restoreSound);
-        web.document.removeEventListener('keydown', _restoreSound);
-        if (_mutedForAutoplay) {
-          _mutedForAutoplay = false;
-          element.muted = false;
-        }
+      if (!autoplayMutedController.isClosed) {
+        autoplayMutedController.add(null);
       }
-      _restoreSound = restore.toJS;
-      web.document.addEventListener('pointerdown', _restoreSound);
-      web.document.addEventListener('keydown', _restoreSound);
       return;
     }
     // A play() request that a later load or pause superseded is the player's
@@ -1514,8 +1507,12 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
-  bool _mutedForAutoplay = false;
-  web.EventListener? _restoreSound;
+  /// Emits whenever the browser refused audible playback and the player fell
+  /// back to muted playback. The application should reflect that in its own
+  /// mute state, since a browser will not unmute without a user gesture.
+  Stream<void> get autoplayMuted => autoplayMutedController.stream;
+  final StreamController<void> autoplayMutedController =
+      StreamController<void>.broadcast();
 
   void _loadSource(Media media) {
     try {
