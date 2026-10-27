@@ -108,11 +108,47 @@ extension ExtensionHls on Hls {
   external void attachMedia(web.HTMLVideoElement video);
   external void destroy();
   external void on(String event, JSFunction listener);
+
+  /// Detaches and re-attaches the media element, which clears its error and
+  /// resumes loading where playback stopped. Does not resume playback.
+  external void recoverMediaError();
+
+  /// Alternate audio renditions listed in the multivariant playlist.
+  external HlsTrackList get audioTracks;
+}
+
+@JS()
+@staticInterop
+class HlsTrackList {}
+
+extension ExtensionHlsTrackList on HlsTrackList {
+  external int get length;
 }
 
 /// Name of the hls.js error event, for [ExtensionHls.on].
 @JS('Hls.Events.ERROR')
 external String get hlsErrorEvent;
+
+/// Name of the hls.js event fired once a MediaSource is attached to the
+/// element, for [ExtensionHls.on].
+@JS('Hls.Events.MEDIA_ATTACHED')
+external String get hlsMediaAttachedEvent;
+
+/// Name of the hls.js event fired when it creates source buffers for the
+/// tracks it found in the stream, for [ExtensionHls.on].
+@JS('Hls.Events.BUFFER_CODECS')
+external String get hlsBufferCodecsEvent;
+
+/// The data hls.js passes to a buffer codecs listener: one entry per source
+/// buffer, absent for a track the stream lacks or hls.js cannot demux.
+@JS()
+@staticInterop
+class HlsBufferCodecsData {}
+
+extension ExtensionHlsBufferCodecsData on HlsBufferCodecsData {
+  external JSObject? get audio;
+  external JSObject? get audiovideo;
+}
 
 /// The data hls.js passes to an error listener.
 @JS()
