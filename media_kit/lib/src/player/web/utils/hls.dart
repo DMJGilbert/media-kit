@@ -113,6 +113,8 @@ extension ExtensionHls on Hls {
   /// resumes loading where playback stopped. Does not resume playback.
   external void recoverMediaError();
 
+  external void stopLoad();
+
   /// Alternate audio renditions listed in the multivariant playlist.
   external HlsTrackList get audioTracks;
 }
@@ -123,6 +125,16 @@ class HlsTrackList {}
 
 extension ExtensionHlsTrackList on HlsTrackList {
   external int get length;
+  external HlsAudioTrack? at(int index);
+}
+
+@JS()
+@staticInterop
+class HlsAudioTrack {}
+
+extension ExtensionHlsAudioTrack on HlsAudioTrack {
+  /// Empty for a rendition muxed into the main stream.
+  external String? get url;
 }
 
 /// Name of the hls.js error event, for [ExtensionHls.on].
