@@ -56,7 +56,20 @@ class WebVideoController extends PlatformVideoController {
     // Register the [html.VideoElement] as platform view.
     platformViewRegistry.registerViewFactory(
       'com.alexmercerind.media_kit_video.$handle',
-      (int _) => controller._element!,
+      (int _) {
+        final element = controller._element!;
+        // Flutter creates a new platform view whenever the widget tree around
+        // the [Video] changes and moves this element into it. Browsers pause a
+        // media element that is moved in the DOM, so resume a playing element
+        // when that pause arrives.
+        if (!element.paused) {
+          element.onPause.first.timeout(const Duration(seconds: 1)).then(
+            (_) => element.play().toDart.catchError((_) => null),
+            onError: (_) {},
+          );
+        }
+        return element;
+      },
     );
 
     // On web implementation, we are having [handle] & [controller.id] same, which in itself is a simple counter based value managed within [Player].

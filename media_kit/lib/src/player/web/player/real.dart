@@ -60,6 +60,9 @@ class WebPlayer extends PlatformPlayer {
         ..style.width = '100%'
         ..style.height = '100%'
         ..style.border = 'none'
+        // Flutter owns all pointer handling; a platform view that swallows
+        // clicks and hovers would hide them from the widgets around it.
+        ..style.pointerEvents = 'none'
         /* ..setAttribute('autoplay', 'false') */
         ..setAttribute('playsinline', 'true')
         ..pause();
@@ -74,6 +77,7 @@ class WebPlayer extends PlatformPlayer {
       // --------------------------------------------------
       // Event streams handling:
       element.onPlay.listen((_) {
+        _resumeAfterMediaRecovery = true;
         lock.synchronized(() async {
           // PlayerState.state.playing & PlayerState.stream.playing
           state = state.copyWith(playing: true);
@@ -83,6 +87,12 @@ class WebPlayer extends PlatformPlayer {
         });
       });
       element.onPause.listen((_) {
+        // Chrome pauses a failed element straight after its error event; only
+        // other pauses, such as a media key, stop playback resuming after a
+        // recovery.
+        if (element.error == null && !_recoveringMedia) {
+          _resumeAfterMediaRecovery = false;
+        }
         lock.synchronized(() async {
           // PlayerState.state.playing & PlayerState.stream.playing
           state = state.copyWith(playing: false);
@@ -114,6 +124,18 @@ class WebPlayer extends PlatformPlayer {
         });
       });
       element.onTimeUpdate.listen((_) {
+        if (_mediaRecoveries > 0) {
+          // Counted in decoded frames, as a recovery on a live stream can
+          // move the position forward without anything being decoded.
+          final frames = element.getVideoPlaybackQuality().totalVideoFrames;
+          if (frames < _mediaRecoveryFrames) {
+            _mediaRecoveryFrames = 0;
+          }
+          if (frames - _mediaRecoveryFrames >=
+              _kMediaRecoveryProgressFrames) {
+            _mediaRecoveries = 0;
+          }
+        }
         lock.synchronized(() async {
           // PlayerState.state.position & PlayerState.stream.position
           Duration? position = convertNumVideoDurationToPluginDuration(
@@ -238,6 +260,10 @@ class WebPlayer extends PlatformPlayer {
         });
       });
       element.onError.listen((_) {
+        if (_hls != null) {
+          _lastMediaError = _describeMediaError();
+          _scheduleHlsMediaRecovery();
+        }
         lock.synchronized(() async {
           // PlayerState.state.buffering & PlayerState.stream.buffering
           state = state.copyWith(buffering: false);
@@ -245,6 +271,12 @@ class WebPlayer extends PlatformPlayer {
             bufferingController.add(false);
           }
           // PlayerStream.error
+          // While hls.js is attached it owns the element and reports its own
+          // errors (recovering from some); an error after the source has been
+          // removed belongs to a load that was stopped on purpose.
+          if (_hls != null || element.getAttribute('src') == null) {
+            return;
+          }
           final error = element.error!;
           if (!errorController.isClosed) {
             errorController.add(error.message);
@@ -329,6 +361,11 @@ class WebPlayer extends PlatformPlayer {
 
       disposed = true;
 
+      _hls?.destroy();
+      _hls = null;
+      await autoplayMutedController.close();
+      await hlsAudioController.close();
+      _mediaRecoveryTimer?.cancel();
       element
         ..src = ''
         ..load()
@@ -410,10 +447,7 @@ class WebPlayer extends PlatformPlayer {
 
       if (play) {
         element.play().toDart.catchError((error) {
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         });
       } else {
@@ -455,8 +489,14 @@ class WebPlayer extends PlatformPlayer {
         trackController.add(Track());
       }
 
+      _hls?.destroy();
+      _hls = null;
+      _resetMediaRecovery();
+      _resumeAfterMediaRecovery = false;
+      // Removing the attribute resets the element quietly; an empty src
+      // would raise an error event for a source that no longer exists.
       element
-        ..src = ''
+        ..removeAttribute('src')
         ..load();
 
       _shuffle.clear();
@@ -561,11 +601,7 @@ class WebPlayer extends PlatformPlayer {
       await waitForVideoControllerInitializationIfAttached;
       element.play().toDart.catchError(
         (error) {
-          // PlayerStream.error
-          final e = error as web.DOMException;
-          if (!errorController.isClosed) {
-            errorController.add(e.message);
-          }
+          _handlePlayError(error as web.DOMException);
           return null;
         },
       );
@@ -586,6 +622,7 @@ class WebPlayer extends PlatformPlayer {
       }
       await waitForPlayerInitialization;
       await waitForVideoControllerInitializationIfAttached;
+      _resumeAfterMediaRecovery = false;
       element.pause();
     }
 
@@ -1055,11 +1092,10 @@ class WebPlayer extends PlatformPlayer {
       await waitForPlayerInitialization;
       await waitForVideoControllerInitializationIfAttached;
 
-      // Unmute the player before setting the volume.
-      if (element.muted) {
-        element.muted = false;
-      }
-
+      // Volume 0 is mute. Keeping the element muted rather than merely at
+      // volume 0 lets it autoplay where audible playback is refused, and a
+      // browser pauses a video that script unmutes before any user gesture.
+      element.muted = volume <= 0;
       element.volume = volume / 100.0;
     }
 
@@ -1473,9 +1509,149 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
+  /// Browsers refuse audible playback that no user gesture preceded, e.g. on a
+  /// page reload. Muted playback is always allowed, so fall back to it and tell
+  /// the application through [autoplayMuted]; the sound comes back when the
+  /// application next sets a non-zero volume, which it does from a user
+  /// gesture such as pressing its own unmute control.
+  void _handlePlayError(web.DOMException e) {
+    if (e.name == 'NotAllowedError' && !element.muted) {
+      element.muted = true;
+      element.play().toDart.catchError((_) => null);
+      if (!autoplayMutedController.isClosed) {
+        autoplayMutedController.add(null);
+      }
+      return;
+    }
+    // A play() request that a later load or pause superseded is the player's
+    // own doing, not a failure of the media; a source that cannot play raises
+    // an error event on the element as well.
+    if (e.name == 'AbortError') {
+      return;
+    }
+    // PlayerStream.error
+    if (!errorController.isClosed) {
+      errorController.add(e.message);
+    }
+  }
+
+  /// Emits whenever the browser refused audible playback and the player fell
+  /// back to muted playback. The application should reflect that in its own
+  /// mute state, since a browser will not unmute without a user gesture.
+  Stream<void> get autoplayMuted => autoplayMutedController.stream;
+  final StreamController<void> autoplayMutedController =
+      StreamController<void>.broadcast();
+
+  /// Emits whether the stream has audio the browser can play, each time
+  /// hls.js parses an initialisation segment (at the start and on a level
+  /// switch). hls.js plays the picture alone when the stream's only audio is
+  /// in a format it cannot demux.
+  Stream<bool> get hlsAudio => hlsAudioController.stream;
+  final StreamController<bool> hlsAudioController =
+      StreamController<bool>.broadcast();
+
+  /// hls.js recovers a failed element, typically on a picture the browser
+  /// cannot decode, when its next append is refused or the MediaSource
+  /// closes. With a full buffer ahead of the stopped picture neither may
+  /// happen, so if the element is still failed after
+  /// [_kMediaRecoveryDelay] re-attach it as hls.js would, up to
+  /// [_kMaxMediaRecoveries] times without [_kMediaRecoveryProgressFrames]
+  /// frames being decoded in between. After that, report the browser's error
+  /// once and stop loading, so the application can say why playback stopped.
+  void _scheduleHlsMediaRecovery() {
+    final hls = _hls;
+    _mediaRecoveryTimer?.cancel();
+    _mediaRecoveryTimer = Timer(_kMediaRecoveryDelay, () {
+      // hls.js has recovered or given up, or the source has changed.
+      if (_hls != hls ||
+          hls == null ||
+          element.error == null ||
+          _mediaErrorReported) {
+        return;
+      }
+      if (_mediaRecoveries >= _kMaxMediaRecoveries) {
+        _resumeAfterMediaRecovery = false;
+        _mediaErrorReported = true;
+        hls.stopLoad();
+        if (!errorController.isClosed) {
+          // PlayerStream.error
+          errorController.add(
+            'browser ${_describeMediaError() ?? _lastMediaError}',
+          );
+        }
+        return;
+      }
+      _mediaRecoveries++;
+      _mediaRecoveryFrames =
+          element.getVideoPlaybackQuality().totalVideoFrames;
+      _recoveringMedia = true;
+      hls.recoverMediaError();
+    });
+  }
+
+  void _resetMediaRecovery() {
+    _mediaRecoveryTimer?.cancel();
+    _mediaRecoveryTimer = null;
+    _mediaRecoveries = 0;
+    _recoveringMedia = false;
+    _mediaErrorReported = false;
+    _lastMediaError = null;
+  }
+
+  /// The element's error as "<MediaError code name>: <browser message>", or
+  /// null when the element has not failed.
+  String? _describeMediaError() {
+    final error = element.error;
+    if (error == null) {
+      return null;
+    }
+    const names = {
+      1: 'MEDIA_ERR_ABORTED',
+      2: 'MEDIA_ERR_NETWORK',
+      3: 'MEDIA_ERR_DECODE',
+      4: 'MEDIA_ERR_SRC_NOT_SUPPORTED',
+    };
+    return '${names[error.code] ?? 'MediaError ${error.code}'}: ${error.message}';
+  }
+
+  /// Leaves hls.js the first chance to recover, as it can also switch to
+  /// another variant.
+  static const _kMediaRecoveryDelay = Duration(seconds: 2);
+
+  /// Matches hls.js's own appendErrorMaxRetry default.
+  static const _kMaxMediaRecoveries = 3;
+
+  /// Frames that must be decoded after a recovery before playback counts as
+  /// healthy again, so a stream that fails every few seconds is still given
+  /// up on. About 10 seconds at 25 frames per second.
+  static const _kMediaRecoveryProgressFrames = 250;
+
+  Timer? _mediaRecoveryTimer;
+
+  /// Media errors recovered since [_kMediaRecoveryProgressFrames] frames were
+  /// last decoded, counted from [_mediaRecoveryFrames].
+  int _mediaRecoveries = 0;
+  int _mediaRecoveryFrames = 0;
+
+  /// Set while the element is re-attached after a media error.
+  bool _recoveringMedia = false;
+
+  /// The element's error when it last failed; hls.js clears it when it
+  /// re-attaches the element, before reporting a fatal error.
+  String? _lastMediaError;
+
+  bool _mediaErrorReported = false;
+
+  /// Whether to resume playback once hls.js has re-attached the element:
+  /// playback had started and nothing but a failure has paused it since.
+  bool _resumeAfterMediaRecovery = false;
+
   void _loadSource(Media media) {
     try {
-      if (_isHLS(media.uri)) {
+      _hls?.destroy();
+      _hls = null;
+      _resetMediaRecovery();
+      if (_isHLS(media)) {
         void setHlsHTTPHeaders(web.XMLHttpRequest xhr, String url) {
           for (final header in media.httpHeaders!.entries) {
             xhr.setRequestHeader(header.key, header.value);
@@ -1490,8 +1666,74 @@ class WebPlayer extends PlatformPlayer {
           ),
         );
 
+        // hls.js failures never reach the video element, so report the fatal
+        // ones (hls.js gives up after those) on PlayerStream.error as
+        // "hls.js <details> (HTTP <status>): <url>". A status of 0 means the
+        // browser refused the request itself: an untrusted certificate, a
+        // missing CORS header, mixed content or an unreachable host.
+        void onHlsError(JSString _, HlsErrorData data) {
+          if (!data.fatal) {
+            return;
+          }
+          // hls.js has stopped loading; neither recover nor resume after it.
+          _mediaErrorReported = true;
+          _resumeAfterMediaRecovery = false;
+          _mediaRecoveryTimer?.cancel();
+          final code = data.response?.code;
+          final status = code == null ? '' : ' (HTTP $code)';
+          // A failed element is the cause of a media error; say how it failed.
+          final mediaError = data.type == 'mediaError'
+              ? _describeMediaError() ?? _lastMediaError
+              : null;
+          final cause = mediaError == null ? '' : ' ($mediaError)';
+          if (!errorController.isClosed) {
+            errorController.add(
+              'hls.js ${data.details}$status: ${data.url ?? data.frag?.url ?? media.uri}$cause',
+            );
+          }
+        }
+
+        // Re-attaching the element to recover from a media error leaves it
+        // paused, as the browser paused it when it failed.
+        var attached = false;
+        void onHlsMediaAttached(JSString _, JSObject __) {
+          final reattached = attached;
+          attached = true;
+          _recoveringMedia = false;
+          if (reattached && _resumeAfterMediaRecovery && element.paused) {
+            element.play().toDart.catchError((error) {
+              _handlePlayError(error as web.DOMException);
+              return null;
+            });
+          }
+        }
+
+        // hls.js skips audio it cannot demux (e.g. AAC in LATM rather than
+        // ADTS) without an error, leaving a silent picture. Audio renditions
+        // without a URI are muxed into the main stream, so only those with
+        // one are alternate audio.
+        void onHlsBufferCodecs(JSString _, HlsBufferCodecsData data) {
+          var alternateAudio = false;
+          final tracks = hls.audioTracks;
+          for (var i = 0; i < tracks.length; i++) {
+            final url = tracks.at(i)?.url;
+            if (url != null && url.isNotEmpty) {
+              alternateAudio = true;
+            }
+          }
+          final audio =
+              data.audio != null || data.audiovideo != null || alternateAudio;
+          if (!hlsAudioController.isClosed) {
+            hlsAudioController.add(audio);
+          }
+        }
+
+        hls.on(hlsErrorEvent, onHlsError.toJS);
+        hls.on(hlsMediaAttachedEvent, onHlsMediaAttached.toJS);
+        hls.on(hlsBufferCodecsEvent, onHlsBufferCodecs.toJS);
         hls.loadSource(media.uri);
         hls.attachMedia(element);
+        _hls = hls;
       } else {
         // Default
         String src = media.uri;
@@ -1515,19 +1757,20 @@ class WebPlayer extends PlatformPlayer {
     }
   }
 
-  bool _isHLS(String src) {
-    final userAgent = web.window.navigator.userAgent;
-    final isAndroidChrome =
-        userAgent.contains("Android") && userAgent.contains("Chrome");
-
-    if (!isAndroidChrome &&
-        element.canPlayType('application/vnd.apple.mpegurl') != '') {
+  bool _isHLS(Media media) {
+    // A caller that knows the stream is HLS can pass `extras: {'hls': true}`
+    // for playlist URLs that carry no .m3u8 extension.
+    final hinted = media.extras?['hls'] == true;
+    if (!hinted && !media.uri.toLowerCase().contains('m3u8')) {
       return false;
     }
-    if (isHLSSupported() && src.toLowerCase().contains('m3u8')) {
-      return true;
-    }
-    return false;
+    // hls.js is preferred wherever Media Source Extensions exist, as its own
+    // README recommends: it behaves the same in every browser and exposes
+    // renditions and subtitle tracks, whereas the built-in players differ
+    // (Chromium reports HLS support through canPlayType but its player does
+    // not handle every stream and exposes no tracks). Browsers without MSE,
+    // such as Safari on iPhone, fall through to native playback via `src`.
+    return isHLSSupported();
   }
 
   Future<void> _transition() async {
@@ -1633,6 +1876,11 @@ class WebPlayer extends PlatformPlayer {
 
   /// [html.VideoElement] instance reference.
   late web.HTMLVideoElement element;
+
+  /// hls.js instance attached to [element] while an HLS source is loaded.
+  /// hls.js keeps listening to the element until destroyed, so only one
+  /// instance may ever be attached at a time.
+  Hls? _hls;
 
   /// Whether the [Player] has been disposed.
   bool disposed = false;

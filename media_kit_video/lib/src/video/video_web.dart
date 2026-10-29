@@ -8,6 +8,7 @@ import 'dart:js_interop';
 
 import 'package:web/web.dart';
 import 'dart:async';
+import 'package:flutter/rendering.dart' show PlatformViewHitTestBehavior;
 import 'package:flutter/widgets.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -111,6 +112,8 @@ class Video extends StatefulWidget {
   /// The callback invoked when the [Video] exits fullscreen.
   final Future<void> Function() onExitFullscreen;
 
+  final Widget? overlay;
+
   /// FocusNode for keyboard input.
   final FocusNode? focusNode;
 
@@ -132,6 +135,7 @@ class Video extends StatefulWidget {
     this.subtitleViewConfiguration = const SubtitleViewConfiguration(),
     this.onEnterFullscreen = defaultEnterNativeFullscreen,
     this.onExitFullscreen = defaultExitNativeFullscreen,
+    this.overlay,
     this.focusNode,
   });
 
@@ -419,10 +423,28 @@ class VideoState extends State<Video> with WidgetsBindingObserver {
                                                     videoViewParameters
                                                         .aspectRatio!,
                                         height: rect.height,
-                                        child: HtmlElementView(
-                                          key: _key,
-                                          viewType:
-                                              'com.alexmercerind.media_kit_video.$id',
+                                        child: Stack(
+                                          children: [
+                                            const SizedBox(),
+                                            Positioned.fill(
+                                              // Taps must reach the widgets
+                                              // around the video, so the
+                                              // platform view stays out of
+                                              // Flutter's hit test and the
+                                              // Container behind it takes
+                                              // the hit instead.
+                                              child: HtmlElementView(
+                                                key: _key,
+                                                viewType:
+                                                    'com.alexmercerind.media_kit_video.$id',
+                                                hitTestBehavior:
+                                                    PlatformViewHitTestBehavior
+                                                        .transparent,
+                                              ),
+                                            ),
+                                            if (widget.overlay != null)
+                                              widget.overlay!,
+                                          ],
                                         ),
                                       );
                                     }
