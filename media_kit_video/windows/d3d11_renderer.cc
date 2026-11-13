@@ -72,6 +72,15 @@ void D3D11Renderer::SetSize(int32_t width, int32_t height) {
   CreateTexture();
 }
 
+Microsoft::WRL::ComPtr<ID3D11Texture2D> D3D11Renderer::back_buffer() const {
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer;
+  if (swap_chain_ != nullptr) {
+    swap_chain_->GetBuffer(0, __uuidof(ID3D11Texture2D),
+                           (void**)&back_buffer);
+  }
+  return back_buffer;
+}
+
 void D3D11Renderer::CopyTexture() {
   ::WaitForSingleObject(mutex_, INFINITE);
   

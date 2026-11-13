@@ -31,7 +31,9 @@ class D3D11Renderer {
   const int32_t height() const { return height_; }
   const HANDLE handle() const { return handle_; }
   ID3D11Device* device() const { return d3d_11_device_; }
-  IDXGISwapChain* swap_chain() const { return swap_chain_; }
+
+  // Swap chain back buffer, passed to mpv as mpv_d3d11_fbo::tex.
+  Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer() const;
 
   D3D11Renderer(int32_t width, int32_t height);
 

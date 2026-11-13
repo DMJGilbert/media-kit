@@ -13,7 +13,7 @@
 
 #include <client.h>
 #include <render.h>
-#include <render_dxgi.h>
+#include <render_d3d11.h>
 
 #include <future>
 #include <memory>
