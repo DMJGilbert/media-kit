@@ -30,7 +30,7 @@ abstract class TempFile {
     } else if (Platform.isIOS) {
       result = Directory.systemTemp.path;
     } else if (Platform.isAndroid) {
-      result = AndroidHelper.filesDir;
+      result = AndroidHelper.filesDir ?? Directory.systemTemp.path;
     }
     if (result != null) {
       return result;
